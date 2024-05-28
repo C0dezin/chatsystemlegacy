@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PintoGames Chat</title>
+    <script src="https://cdn.socket.io/4.1.3/socket.io.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .hidden { display: none; }
+        input, button, textarea { padding: 10px; margin: 5px; width: 100%; }
+        .messages { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+        .message { margin: 5px 0; }
+        .user { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container" id="create">
+        <h1>Create room</h1>
+        <input type="text" id="newRoomName" placeholder="Room's name">
+        <input type="text" id="newRoomKey" placeholder="Room's key">
+        <textarea id="newRoomUsers" placeholder="Authorized users (comma separated)"></textarea>
+        <button onclick="createRoom()">Create</button>
+    </div>
+
+    <div class="container" id="entry">
+        <h1>Join room</h1>
+        <input type="text" id="roomKey" placeholder="Room's key">
+        <input type="text" id="userName" placeholder="Name">
+        <button onclick="joinRoom()">Join</button>
+    </div>
+
+    <div class="container hidden" id="chat">
+        <h1>Chat</h1>
+        <h2 id="roomName"></h2>
+        <p>Connected Users: <span id="userCount"></span></p>
+        <div class="messages" id="messages"></div>
+        <input type="text" id="message" placeholder="Your message">
+        <button onclick="sendMessage()">Send</button>
+        <button onclick="leaveRoom()">Leave</button>
+    </div>
+
+    <script>
+
+const socket = io();
+
+socket.on('userCount', (count) => {
+    document.getElementById('userCount').textContent = count;
+});
+
+socket.on('joinSuccess', (data) => {
+        document.getElementById('roomName').textContent = data.roomName;
+        document.getElementById('userCount').textContent = data.userCount;
+    
+        document.getElementById('entry').classList.add('hidden');
+        document.getElementById('chat').classList.remove('hidden');
+    
+        currentUser = userName;
+        currentRoomKey = roomKey;
+        loadMessages();
+    });
+
+    socket.on('messageSuccess', (data) => {
+        console.log("updating messages")
+        loadMessages()
+    })
+
+        let currentUser = '';
+        let currentRoomKey = '';
+
+        async function createRoom() {
+            const roomName = document.getElementById('newRoomName').value;
+            const key = document.getElementById('newRoomKey').value;
+            const users = document.getElementById('newRoomUsers').value.split(',').map(user => user.trim());
+
+            if (!roomName || !key || users.length === 0) {
+                alert('Fill all fields!');
+                return;
+            }
+
+            const response = await fetch('/api/create-room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ roomName, key, users })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                alert(`Room created successfully! Key: ${data.roomKey}`);
+            } else {
+                alert('Error while creating the room.');
+            }
+        }
+
+        async function joinRoom() {
+        const roomKey = document.getElementById('roomKey').value;
+        const userName = document.getElementById('userName').value;
+
+        if (!roomKey || !userName) {
+            alert('Fill all fields!');
+            return;
+        }
+
+        // Join room event
+        socket.emit('join', { roomKey, userName });
+    }
+
+    async function leaveRoom() {
+        const roomKey = currentRoomKey;
+        const userName = currentUser;
+
+        // Leave room event
+        socket.emit('leave', { roomKey, userName });
+    }
+
+    async function loadMessages() {
+    if (!currentRoomKey || !currentUser) return;
+
+    const encodedRoomKey = encodeURIComponent(currentRoomKey.value); //url encode room key
+    const encodedUserName = encodeURIComponent(currentUser.value); // url encode username
+
+    try {
+        const response = await fetch(`/api/messages?roomKey=${encodedRoomKey}&userName=${encodedUserName}`);
+        if (!response.ok) {
+            throw new Error('Error while fetching messages');
+        }
+        const messages = await response.json();
+
+        const messagesDiv = document.getElementById('messages');
+        messagesDiv.innerHTML = '';
+        messages.forEach(msg => {
+            if (msg.message) {
+                const div = document.createElement('div');
+                div.className = 'message';
+                div.innerHTML = `<span class="user">${msg.user}:</span> ${msg.message}`;
+                messagesDiv.appendChild(div);
+            }
+        });
+    } catch (error) {
+        console.error('Error:', error.message);
+    }
+}
+
+
+async function sendMessage() {
+        const message = document.getElementById('message').value;
+
+        if (!message) {
+            alert('Message cannot be empty');
+            return;
+        }
+
+        const data = {
+            roomKey: currentRoomKey.value,
+            userName: currentUser.value,
+            message: message
+        };
+
+        // Send message event
+        socket.emit('message', data);
+
+        document.getElementById('message').value = '';
+    }
+
+socket.on('message', (data) => {
+    if (data.roomKey === currentRoomKey) {
+        loadMessages();
+    }
+});
+    </script>
+</body>
+</html>
