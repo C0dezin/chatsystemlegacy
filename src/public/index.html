@@ -3,19 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PintoGames Chat</title>
+    <title>Chat</title>
     <script src="https://cdn.socket.io/4.1.3/socket.io.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; }
+        
+        body { font-family: Arial, sans-serif; background-color: black; color: azure; }
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .hidden { display: none; }
         input, button, textarea { padding: 10px; margin: 5px; width: 100%; }
-        .messages { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+        .messages { border: 1px solid #860c0c; padding: 10px; height: 500px; width: 1000px; overflow-y: scroll; }
         .message { margin: 5px 0; }
-        .user { font-weight: bold; }
+        .user { font-weight: bold; color: #860c0c; }
+        .hidden { display: none; }
+        h1, h2 { color: #860c0c; }
+        .bg-image { background-color: #111; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        #chat { max-width: 800px; margin: 0 auto; padding: 20px; }
+        #chat.fullscreen { width: calc(100% - 40px); max-width: 1000px; margin: 0 auto; }
+        .message-input {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 20px;
+}
+
+.image-button {
+    padding: 10px;
+    background-color: #860c0c;
+    color: white;
+    cursor: pointer;
+}
+
+.send-button {
+    width: 90px;
+    height: 40px;
+    background-color: #860c0c;
+    color: white;
+    text-align: center;
+    line-height: 40px;
+    cursor: pointer;
+    border-radius: 50%;
+    font-size: 24px;
+}
+
+    .message img.small {
+        max-width: 396px;
+        max-height: 296px;
+    }
+
+    .message img.large {
+        max-width: 545px;
+        max-height: 309px;
+    }
+
+    .message-with-image { display: flex; align-items: center; }
+        .message-with-image .user { margin-right: 10px; }
+        .message-with-image img { max-width: 100px; max-height: 100px; margin-right: 10px; }
+        
+    
     </style>
 </head>
 <body>
+    <div class="bg-image"></div>
     <div class="container" id="create">
         <h1>Create room</h1>
         <input type="text" id="newRoomName" placeholder="Room's name">
@@ -36,12 +83,38 @@
         <h2 id="roomName"></h2>
         <p>Connected Users: <span id="userCount"></span></p>
         <div class="messages" id="messages"></div>
-        <input type="text" id="message" placeholder="Your message">
-        <button onclick="sendMessage()">Send</button>
+        <div class="message-input">
+            <input type="text" id="message" placeholder="Your message">
+            <input type="file" id="imageInput" accept="image/*">
+            <div class="send-button" onclick="sendMessage()">></div>
+        </div>
         <button onclick="leaveRoom()">Leave</button>
     </div>
+    
 
     <script>
+let shouldScrollToBottom = true;
+document.getElementById('message').addEventListener('keypress', function(event) {
+    if (event.key === 'Enter') {
+        sendMessage();
+    }
+});
+
+function checkScrollPosition() {
+    const messagesDiv = document.getElementById('messages');
+    const scrollTop = messagesDiv.scrollTop;
+    const scrollHeight = messagesDiv.scrollHeight;
+    const clientHeight = messagesDiv.clientHeight;
+
+    // Verifica se o usuário está no final da lista de mensagens
+    shouldScrollToBottom = Math.ceil(scrollTop + clientHeight) === scrollHeight;
+}
+
+
+document.getElementById('messages').addEventListener('scroll', () => {
+    checkScrollPosition();
+});
+
 
 const socket = io();
 
@@ -49,16 +122,29 @@ socket.on('userCount', (count) => {
     document.getElementById('userCount').textContent = count;
 });
 
+function scrollToBottom() {
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
 socket.on('joinSuccess', (data) => {
         document.getElementById('roomName').textContent = data.roomName;
         document.getElementById('userCount').textContent = data.userCount;
     
         document.getElementById('entry').classList.add('hidden');
+        document.getElementById('create').classList.add('hidden');
         document.getElementById('chat').classList.remove('hidden');
     
         currentUser = userName;
         currentRoomKey = roomKey;
+        const chat = document.getElementById('chat');
+        chat.classList.toggle('fullscreen');
+
         loadMessages();
+    });
+
+    socket.on('leaveSuccess', (data) => {
+        window.location.reload();
     });
 
     socket.on('messageSuccess', (data) => {
@@ -89,7 +175,8 @@ socket.on('joinSuccess', (data) => {
 
             if (response.ok) {
                 const data = await response.json();
-                alert(`Room created successfully! Key: ${data.roomKey}`);
+                navigator.clipboard.writeText(data.roomKey);
+                alert(`Room key copied to clipboard.`);
             } else {
                 alert('Error while creating the room.');
             }
@@ -109,8 +196,8 @@ socket.on('joinSuccess', (data) => {
     }
 
     async function leaveRoom() {
-        const roomKey = currentRoomKey;
-        const userName = currentUser;
+        const roomKey = currentRoomKey.value;
+        const userName = currentUser.value;
 
         // Leave room event
         socket.emit('leave', { roomKey, userName });
@@ -133,10 +220,22 @@ socket.on('joinSuccess', (data) => {
         messagesDiv.innerHTML = '';
         messages.forEach(msg => {
             if (msg.message) {
-                const div = document.createElement('div');
-                div.className = 'message';
-                div.innerHTML = `<span class="user">${msg.user}:</span> ${msg.message}`;
-                messagesDiv.appendChild(div);
+                if (msg.message.startsWith('data:image')) {
+                    // If the message starts with 'data:image', its an image
+                    const div = document.createElement('div');
+                    div.className = 'message message-with-image';
+                    div.innerHTML = `<span class="user">${msg.user}:</span><br><img src="${msg.message}" class="small" alt="Image">`;
+                    messagesDiv.appendChild(div);
+                } else {
+                    // if false, its a text message
+                    const div = document.createElement('div');
+                    div.className = 'message';
+                    div.innerHTML = `<span class="user">${msg.user}:</span> ${msg.message}`;
+                    messagesDiv.appendChild(div);
+                }
+                if (shouldScrollToBottom) {
+        scrollToBottom(); // Rola para baixo apenas se o usuário estiver no final da lista
+    }
             }
         });
     } catch (error) {
@@ -146,13 +245,16 @@ socket.on('joinSuccess', (data) => {
 
 
 async function sendMessage() {
-        const message = document.getElementById('message').value;
+    const message = document.getElementById('message').value;
+    const fileInput = document.getElementById('imageInput');
+    const file = fileInput.files[0];
 
-        if (!message) {
-            alert('Message cannot be empty');
-            return;
-        }
+    if (!message && !file) {
+        alert('Message or image cannot be empty');
+        return;
+    }
 
+    if (message) {
         const data = {
             roomKey: currentRoomKey.value,
             userName: currentUser.value,
@@ -161,9 +263,29 @@ async function sendMessage() {
 
         // Send message event
         socket.emit('message', data);
-
-        document.getElementById('message').value = '';
     }
+
+    if (file) {
+        const reader = new FileReader();
+        reader.onloadend = function () {
+            const base64String = reader.result.replace("data:", "").replace(/^.+,/, "");
+
+            const data = {
+                roomKey: currentRoomKey.value,
+                userName: currentUser.value,
+                image: base64String,
+                imageType: file.type
+            };
+
+            socket.emit('image', data);
+        };
+        reader.readAsDataURL(file);
+        fileInput.value = '';
+    }
+
+    document.getElementById('message').value = '';
+}
+
 
 socket.on('message', (data) => {
     if (data.roomKey === currentRoomKey) {

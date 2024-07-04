@@ -9,48 +9,22 @@ function createRoom(req, res) {
         return res.status(400).send('Rooms name, Rooms key and Authorized users are required.');
     }
     const today = moment().format('YYYYMMDD');
-    const roomKey = encryptMessage(`${today}-${roomName}-${key}`, key);
+    const currentTime = moment().format('HHmmss');
+    const randomNumber = Math.floor(Math.random() * 1000000) + 1;
+    const roomKey = encryptMessage(`${today}-${currentTime}-${randomNumber}-${roomName}-${key}`, key);
 
     rooms[roomKey] = {
         name: roomName,
         users: new Set(users),
         messages: [],
-        connectedUsers: new Set()
+        connectedUsers: new Set(),
+        inactivityTimer: null,
+        initialConnectionTimer: null
     };
 
+    startInitialConnectionTimer(roomKey);
+
     res.status(201).send({ roomKey });
-}
-
-function joinRoom(req, res) {
-    const { roomKey, userName } = req.body;
-
-    if (!roomKey || !userName) {
-        return res.status(400).send('Rooms key and username are required');
-    }
-
-    const room = rooms[roomKey];
-    if (!room || !room.users.has(userName)) {
-        return res.status(400).send('The specified room does not exist.'); //if the user isnt authorzied or the room does not exist
-    }
-
-    room.connectedUsers.add(userName);
-
-    // Send event to all clients saying that theres a new user
-    io.emit('join', { roomKey, userName });
-
-    res.status(200).send({ roomName: room.name, userCount: room.connectedUsers.size });
-}
-
-
-function leaveRoom(req, res) {
-    const { roomKey, userName } = req.body;
-    const room = rooms[roomKey];
-
-    if (room) {
-        room.connectedUsers.delete(userName);
-    }
-
-    res.status(200).send('User left.');
 }
 
 function getMessages(req, res) {
@@ -82,4 +56,15 @@ function postMessage(req, res) {
     res.status(201).send('Message sent.');
 }
 
-module.exports = { createRoom, joinRoom, leaveRoom, getMessages, postMessage, rooms };
+function startInitialConnectionTimer(roomKey) {
+    if (rooms[roomKey].initialConnectionTimer) {
+        clearTimeout(rooms[roomKey].initialConnectionTimer);
+    }
+    rooms[roomKey].initialConnectionTimer = setTimeout(() => {
+        console.log(`Sala ${roomKey} deletada por falta de conexão inicial.`);
+        delete rooms[roomKey];
+        console.log(rooms)
+    }, 5 * 60 * 1000);
+}
+
+module.exports = { createRoom, getMessages, startInitialConnectionTimer, rooms };

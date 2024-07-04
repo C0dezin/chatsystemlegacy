@@ -3,7 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const bodyParser = require('body-parser');
 const chatRoutes = require('./src/routes/chatRoute');
-const { rooms } = require("./src/controllers/chatController")
+const { rooms, startInitialConnectionTimer } = require("./src/controllers/chatController")
 const { encryptMessage } = require("./src/utils/encryption")
 
 const app = express();
@@ -14,12 +14,21 @@ const io = socketIo(server);
 app.use(bodyParser.json());
 
 
+function startInactivityTimer(roomKey) {
+    if (rooms[roomKey].inactivityTimer) {
+        clearTimeout(rooms[roomKey].inactivityTimer);
+    }
+    rooms[roomKey].inactivityTimer = setTimeout(() => {
+        console.log(`Sala ${roomKey} deletada por inatividade.`);
+        io.to(roomKey).emit('leaveSuccess')
+        delete rooms[roomKey];
+        console.log(rooms)
+    }, 15 * 60 * 1000);
+}
+
 // Websocket config
 io.on('connection', (socket) => {
-    console.log('Novo cliente conectado');
-    socket.on('disconnect', () => {
-        console.log('Cliente desconectado');
-    });
+    console.log('New connection to socket.');
 
     socket.on('message', (data) => {
         console.log(data)
@@ -40,6 +49,23 @@ io.on('connection', (socket) => {
     
         // If successful, make all clients reload messages.
         io.to(roomKey).emit('messageSuccess', 'Message event called');
+        //Restarts inactivity timer
+        startInactivityTimer(data.roomKey, socket);
+    });
+
+    socket.on('image', (data) => {
+        const room = rooms[data.roomKey];
+        if (room && room.connectedUsers.has(data.userName)) {
+            const base64Image = `data:${data.imageType};base64,${data.image}`;
+            const encryptedMessage = encryptMessage(base64Image, data.roomKey);
+            room.messages.push({ user: data.userName, message: encryptedMessage });
+
+            startInactivityTimer(data.roomKey);
+
+            io.to(data.roomKey).emit('message', { user: data.userName, message: base64Image });
+            io.to(data.roomKey).emit('messageSuccess', 'Message event called');
+            startInactivityTimer(data.roomKey, socket);
+        }
     });
 
     socket.on('join', (data) => {
@@ -61,6 +87,10 @@ io.on('connection', (socket) => {
                 }
             }
     
+            if (room.connectedUsers.size === 0) {
+                // Primeira conexão de um usuário, cancela o temporizador inicial
+                clearTimeout(room.initialConnectionTimer);
+            }
             // If everthing is ok, add the user to the chat
             socket.join(data.roomKey);
             room.connectedUsers.add(data.userName);
@@ -81,12 +111,16 @@ io.on('connection', (socket) => {
             socket.emit('leaveSuccess')
             // Change the usercount if someone leaves
             io.to(data.roomKey).emit('userCount', room.connectedUsers.size);
+
+            if (room.connectedUsers.size === 0) {
+                console.log(`Room ${data.roomKey} deleted for having no users.`);
+                delete rooms[data.roomKey];
+                console.log(rooms)
+            }
         }
     });
 
-    socket.on('message', (data) => {
-        io.to(data.roomKey).emit('message', { user: data.userName, message: data.message });
-    });
+    
 });
 
 app.use('/api', chatRoutes);
